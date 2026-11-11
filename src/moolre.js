@@ -27,6 +27,7 @@
       this.defaults = {
         apiBase: "https://api.moolre.com/embed",
         checkoutBase: "https://pos.moolre.com",
+        allowedCheckoutOrigins: ["https://pos.moolre.com"],
         username: null,
         publicKey: null,
         accountNumber: null,
@@ -226,7 +227,7 @@
      * - else POST to `${opts.apiBase}/link` with required payload and API headers -> returns data.data.authorization_url
      */
     async _resolvePaymentUrl(opts) {
-      if (opts.paymentUrl) return opts.paymentUrl;
+      if (opts.paymentUrl) return this._validatePaymentUrl(opts.paymentUrl, opts);
 
       const payload = {
         type: 1,
@@ -271,13 +272,31 @@
       if (!url) {
         throw new Error("Missing authorization_url in API response");
       }
-      return url;
+      return this._validatePaymentUrl(url, opts);
+    }
+
+    _validatePaymentUrl(value, opts = {}) {
+      let url;
+      try {
+        if (typeof value !== "string") throw new Error();
+        url = new URL(value);
+      } catch (e) {
+        throw new Error("Invalid checkout URL");
+      }
+      const allowed = opts.allowedCheckoutOrigins ?? this.defaults.allowedCheckoutOrigins;
+      if (url.protocol !== "https:" || url.username || url.password ||
+          !this._isAllowedOrigin(url.origin, allowed)) {
+        throw new Error("Checkout URL must use HTTPS and an approved checkout origin");
+      }
+      return url.href;
     }
 
     /**
      * Main modal creation method with loading spinner
      */
     _createModal(url, handlers = {}) {
+      url = this._validatePaymentUrl(url, handlers);
+      const checkoutOrigin = new URL(url).origin;
       this._closeModal();
 
       // Create overlay
@@ -351,6 +370,7 @@
       iframe.setAttribute("frameborder", "0");
       iframe.setAttribute("allow", "payment; fullscreen; clipboard-write");
       iframe.setAttribute("scrolling", "no");
+      iframe.setAttribute("sandbox", "allow-scripts allow-forms allow-same-origin allow-popups");
       iframe.style.cssText = `
         width: 100%;
         height: 100%;
@@ -440,23 +460,24 @@
 
       // Close button action
       closeBtn.addEventListener("click", () => {
-        try { handlers.onCancel?.(); } catch (e) { console.error(e); }
         this._closeModal();
+        try { handlers.onCancel?.(); } catch (e) { console.error(e); }
       });
 
       // Click outside to close
       overlay.addEventListener("click", (ev) => {
         if (ev.target === overlay) {
-          try { handlers.onCancel?.(); } catch (e) { console.error(e); }
           this._closeModal();
+          try { handlers.onCancel?.(); } catch (e) { console.error(e); }
         }
       });
 
       // Handle messages from iframe
       this._listener = (event) => {
-        const allowed = handlers.allowedOrigins ?? [".moolre.com"];
-        const originOk = this._isAllowedOrigin(event.origin, allowed);
-        if (!originOk) return;
+        if (this.iframe !== iframe || this.overlay !== overlay ||
+            event.source !== iframe.contentWindow || event.origin !== checkoutOrigin) return;
+        if (handlers.allowedOrigins !== undefined &&
+            !this._isAllowedOrigin(event.origin, handlers.allowedOrigins)) return;
 
         const data = event.data;
         if (!data || typeof data !== "object") return;
@@ -473,18 +494,23 @@
             break;
           case "payment.success":
           case "payment_success":
-            try { handlers.onSuccess?.(data.data ?? data); } catch (e) { console.error(e); }
+            if (handlers.externalRef !== undefined) {
+              const transaction = data.data ?? data;
+              const reference = transaction.externalref ?? transaction.externalRef ?? transaction.reference;
+              if (typeof reference !== "string" || reference !== handlers.externalRef) return;
+            }
             this._closeModal();
+            try { handlers.onSuccess?.(data.data ?? data); } catch (e) { console.error(e); }
             break;
           case "payment.failed":
           case "payment_failed":
-            try { handlers.onError?.(data.data ?? data); } catch (e) { console.error(e); }
             this._closeModal();
+            try { handlers.onError?.(data.data ?? data); } catch (e) { console.error(e); }
             break;
           case "payment.cancel":
           case "close":
-            try { handlers.onCancel?.(); } catch (e) { console.error(e); }
             this._closeModal();
+            try { handlers.onCancel?.(); } catch (e) { console.error(e); }
             break;
           default:
             break;
@@ -495,8 +521,8 @@
 
       // Expose manual close
       overlay._manualClose = () => {
-        try { handlers.onClose?.(); } catch (e) { console.error("onClose handler error:", e); }
         this._closeModal();
+        try { handlers.onClose?.(); } catch (e) { console.error("onClose handler error:", e); }
       };
 
       // Prevent body scroll
@@ -547,6 +573,8 @@
 
       // trigger fade-out animation
       const overlay = this.overlay;
+      this.overlay = null;
+      this.iframe = null;
       overlay.style.animation = "moolre_fade_out 250ms ease forwards";
 
       const modal = overlay.querySelector(".moolre-modal");
@@ -571,8 +599,6 @@
           }
         } catch (e) {}
 
-        this.overlay = null;
-        this.iframe = null;
       }, 250);
     }
 
@@ -719,6 +745,7 @@
     }
 
     _isAllowedOrigin(origin, allowedOrigins) {
+      if (!Array.isArray(allowedOrigins)) return false;
       let eventUrl;
       try {
         eventUrl = new URL(origin);
@@ -729,14 +756,11 @@
       return allowedOrigins.some((allowedOrigin) => {
         if (typeof allowedOrigin !== "string") return false;
 
-        if (allowedOrigin.startsWith(".")) {
-          const domain = allowedOrigin.slice(1).toLowerCase();
-          const hostname = eventUrl.hostname.toLowerCase();
-          return hostname === domain || hostname.endsWith(`.${domain}`);
-        }
-
         try {
-          return eventUrl.origin === new URL(allowedOrigin).origin;
+          const allowed = new URL(allowedOrigin);
+          return eventUrl.protocol === "https:" && allowed.protocol === "https:" &&
+            !allowed.username && !allowed.password && allowed.pathname === "/" &&
+            !allowed.search && !allowed.hash && eventUrl.origin === allowed.origin;
         } catch (e) {
           return false;
         }

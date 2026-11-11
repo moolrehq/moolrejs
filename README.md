@@ -80,7 +80,8 @@ document.querySelector("#pay-now").addEventListener("click", openPayment);
 | `mode` | No | Payment mode. Defaults to `payment`. |
 | `reusable` | No | Whether the generated link can be reused. |
 | `iframeHeight` | No | Checkout modal height. Defaults to `630px`. |
-| `allowedOrigins` | No | Origins allowed to send checkout events. Defaults to Moolre subdomains. |
+| `allowedCheckoutOrigins` | No | Exact HTTPS checkout origins. Defaults to `["https://pos.moolre.com"]`. Configure additional trusted hosted checkout origins explicitly. Wildcards and domain suffixes are rejected. |
+| `allowedOrigins` | No | Optional additional restriction on message origins. Messages must always come from the active iframe and its exact checkout URL origin. |
 | `paymentUrl` | No | Existing payment URL. When supplied, the SDK does not call the link API and API credentials are not required. |
 
 ## Events
@@ -88,12 +89,18 @@ document.querySelector("#pay-now").addEventListener("click", openPayment);
 | Callback | When it runs |
 | --- | --- |
 | `onLoad` | The checkout iframe has loaded. |
-| `onSuccess` | Payment succeeds. |
+| `onSuccess` | The hosted checkout reports success. Verify the payment on your server before fulfillment. |
 | `onError` | Validation, network, or payment errors occur. |
 | `onCancel` | The customer closes or cancels the checkout. |
 | `onClose` | The modal is manually closed. |
 
 ## Browser and API requirements
+
+Checkout URLs supplied through `paymentUrl` or returned by the link API must use HTTPS, contain no embedded credentials, and match `allowedCheckoutOrigins` exactly (including port). The same rules apply to preloading. Only configure origins you trust to host payment checkout; never build this allowlist from customer input.
+
+When `externalRef` is supplied, success messages must include a matching string in `data.externalref`, `data.externalRef`, or `data.reference` (or the same field at the top level when no `data` wrapper is used). Missing or mismatched references are ignored. Supply `externalRef` when using an existing `paymentUrl` too. Without it, messages are bound to the active iframe and origin only. Hosted checkout integrations must emit the reference to use this stricter contract.
+
+`onSuccess` is a browser notification, not proof of payment. Before marking an order paid or delivering goods, your backend must fetch the authoritative transaction from Moolre and verify successful status, the exact stored order reference, amount, currency, receiving merchant account, and environment. Make fulfillment idempotent and reject replays for cancelled or refunded orders. Browser-supplied amounts, callbacks, and public identifiers cannot authorize fulfillment. Keep verification credentials on your server.
 
 This package is intended for browser applications bundled with a tool such as Vite, Webpack, or Rollup. The minified browser asset is included at `public/v1/moolre.js`; copy it to your own static assets if you need to load it with a script tag.
 
