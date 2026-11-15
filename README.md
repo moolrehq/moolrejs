@@ -97,8 +97,18 @@ document.querySelector("#pay-now").addEventListener("click", openPayment);
 | `reusable` | No | Whether the generated link can be reused. |
 | `iframeHeight` | No | Checkout modal height. Defaults to `630px`. |
 | `allowedCheckoutOrigins` | No | Exact HTTPS checkout origins. Defaults to `["https://pos.moolre.com"]`. Configure additional trusted hosted checkout origins explicitly. Wildcards and domain suffixes are rejected. |
-| `allowedOrigins` | No | Optional additional restriction on message origins. Messages must always come from the active iframe and its exact checkout URL origin. |
+| `allowedOrigins` | No | Optional additional restriction on message origins. Messages must always come from the active iframe and its exact checkout URL origin. The legacy `.domain` suffix form is still accepted here, but it can only narrow trust, never widen it. |
+| `environment` | No | `"live"` (default) or `"sandbox"`. Sandbox sends the link request to `https://sandbox.moolre.com/embed/link`; add the sandbox checkout origin to `allowedCheckoutOrigins`. |
+| `timeoutMs` | No | Abort the link request after this many milliseconds. Defaults to `30000`. |
 | `paymentUrl` | No | Existing payment URL. When supplied, the SDK does not call the link API and API credentials are not required. |
+
+## Errors
+
+`onError` (and the rejected promise) receives an `Error` with `code` (a Moolre code such as `TP13`, or `TIMEOUT` / `NETWORK`), `fields`, `requestId` (quote it to Moolre support) and `httpStatus`. API notices, such as deprecation advice, are logged to the console once per response. `checkout()` calls `onError` and then rejects, so do not handle the same failure twice.
+
+## TypeScript, SSR and cleanup
+
+Type definitions ship with the package. Importing and constructing `MoolrePay` is safe during server-side rendering; styles are added when the first modal opens. Call `popup.destroy()` when your single-page app unmounts. Pressing Escape cancels the modal. Amounts passed as numbers are sent as two-decimal strings (`50` becomes `"50.00"`).
 
 ## Events
 
@@ -109,6 +119,10 @@ document.querySelector("#pay-now").addEventListener("click", openPayment);
 | `onError` | Validation, network, or payment errors occur. |
 | `onCancel` | The customer closes or cancels the checkout. |
 | `onClose` | The modal is manually closed. |
+
+## Content Security Policy and script pinning
+
+Allow `frame-src https://pos.moolre.com` and `connect-src https://api.moolre.com`. Prefer the npm package (pin the exact version) or a self-hosted copy of `public/v1/moolre.js` over an unversioned CDN URL; if you use a CDN, add a Subresource Integrity `integrity` attribute.
 
 ## Browser and API requirements
 

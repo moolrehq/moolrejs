@@ -32,15 +32,30 @@
         publicKey: null,
         accountNumber: null,
         iframeHeight: "630px",
+        environment: "live",
+        timeoutMs: 30000,
         ...defaults,
       };
+      if (defaults.environment === "sandbox" && !defaults.apiBase) {
+        this.defaults.apiBase = "https://sandbox.moolre.com/embed";
+      }
 
       this.overlay = null;
       this.iframe = null;
       this._listener = null;
       this._preloaded = null;
       this._styleElem = null;
-      this._installGlobalStyles();
+      this._keyListener = null;
+      // Styles are installed lazily (first modal) so importing/constructing is safe during SSR.
+    }
+
+    /** Remove the modal, listeners and any preloaded iframe. Safe to call at any time. */
+    destroy() {
+      this._closeModal();
+      if (this._preloaded && this._preloaded.iframe) {
+        try { this._preloaded.iframe.remove(); } catch (e) {}
+      }
+      this._preloaded = null;
     }
 
     /**
@@ -232,7 +247,7 @@
       const payload = {
         type: 1,
         accountnumber: opts.accountNumber,
-        amount: opts.amount,
+        amount: typeof opts.amount === "number" ? opts.amount.toFixed(2) : opts.amount,
         currency: opts.currency || "GHS",
         email: opts.email,
         description: opts.description || "",
@@ -244,15 +259,31 @@
         reusable: opts.reusable || false,
       };
 
-      const res = await fetch(`${opts.apiBase}/link`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-API-USER": opts.username,
-          "X-Api-Pubkey": opts.publicKey,
-        },
-        body: JSON.stringify(payload),
-      });
+      const apiBase = this._assertHttpsBase(opts.apiBase);
+      const ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
+      const timer = ctl ? setTimeout(() => ctl.abort(), opts.timeoutMs || 30000) : null;
+      let res;
+      try {
+        res = await fetch(`${apiBase}/link`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-API-USER": opts.username,
+            "X-Api-Pubkey": opts.publicKey,
+          },
+          body: JSON.stringify(payload),
+          credentials: "omit",
+          signal: ctl ? ctl.signal : undefined,
+        });
+      } catch (e) {
+        const timedOut = e && e.name === "AbortError";
+        const err = new Error(timedOut ? "Request to Moolre timed out" : "Could not reach Moolre: " + (e && e.message));
+        err.code = timedOut ? "TIMEOUT" : "NETWORK";
+        throw err;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+      const requestId = res.headers && res.headers.get ? res.headers.get("x-request-id") : null;
 
       // if not ok, throw an Error with server body
       if (!res.ok) {
@@ -260,19 +291,47 @@
         let err;
         try {
           const parsed = JSON.parse(text);
-          err = new Error(parsed.message || JSON.stringify(parsed));
+          const m = Array.isArray(parsed.message) ? parsed.message.join(" ") : parsed.message;
+          err = new Error(m || "Payment initiation failed");
+          err.code = parsed.code;
+          err.fields = typeof parsed.data === "string" ? [parsed.data] : [];
+          err.requestId = parsed.request_id || requestId;
         } catch (e) {
-          err = new Error(text || "Payment initiation failed");
+          err = new Error((text || "Payment initiation failed").slice(0, 300));
+          err.requestId = requestId;
         }
+        err.httpStatus = res.status;
         throw err;
       }
 
       const json = await res.json();
+      if (json && String(json.status) === "0") {
+        // The API answers HTTP 200 with status 0 for business errors.
+        const m = Array.isArray(json.message) ? json.message.join(" ") : json.message;
+        const err = new Error(m || "Payment initiation failed");
+        err.code = json.code;
+        err.fields = typeof json.data === "string" ? [json.data] : [];
+        err.requestId = json.request_id || requestId;
+        throw err;
+      }
+      if (json && Array.isArray(json.notices) && typeof console !== "undefined") {
+        json.notices.forEach((n) => console.warn("[moolre] " + (n.code || "") + ": " + (n.message || "")));
+      }
       const url = json?.data?.authorization_url || json?.data?.paymentUrl || json?.authorization_url || json?.paymentUrl;
       if (!url) {
         throw new Error("Missing authorization_url in API response");
       }
       return this._validatePaymentUrl(url, opts);
+    }
+
+    _assertHttpsBase(u) {
+      let parsed;
+      try { parsed = new URL(u); } catch (e) { throw new Error("apiBase must be a valid URL"); }
+      const local = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+      if (parsed.protocol !== "https:" && !(local && parsed.protocol === "http:")) {
+        throw new Error("apiBase must use https");
+      }
+      return String(u).replace(/\/+$/, "");
     }
 
     _validatePaymentUrl(value, opts = {}) {
@@ -295,6 +354,7 @@
      * Main modal creation method with loading spinner
      */
     _createModal(url, handlers = {}) {
+      this._installGlobalStyles();
       url = this._validatePaymentUrl(url, handlers);
       const checkoutOrigin = new URL(url).origin;
       this._closeModal();
@@ -369,6 +429,8 @@
       iframe.className = "moolre-iframe";
       iframe.setAttribute("frameborder", "0");
       iframe.setAttribute("allow", "payment; fullscreen; clipboard-write");
+      iframe.setAttribute("referrerpolicy", "strict-origin-when-cross-origin");
+      iframe.setAttribute("title", "Moolre checkout");
       iframe.setAttribute("scrolling", "no");
       iframe.setAttribute("sandbox", "allow-scripts allow-forms allow-same-origin allow-popups");
       iframe.style.cssText = `
@@ -477,7 +539,7 @@
         if (this.iframe !== iframe || this.overlay !== overlay ||
             event.source !== iframe.contentWindow || event.origin !== checkoutOrigin) return;
         if (handlers.allowedOrigins !== undefined &&
-            !this._isAllowedOrigin(event.origin, handlers.allowedOrigins)) return;
+            !this._matchesLegacyOrigin(event.origin, handlers.allowedOrigins)) return;
 
         const data = event.data;
         if (!data || typeof data !== "object") return;
@@ -518,6 +580,14 @@
       };
 
       window.addEventListener("message", this._listener, false);
+
+      this._keyListener = (ev) => {
+        if (ev.key === "Escape") {
+          this._closeModal();
+          try { handlers.onCancel?.(); } catch (e) { console.error(e); }
+        }
+      };
+      document.addEventListener("keydown", this._keyListener);
 
       // Expose manual close
       overlay._manualClose = () => {
@@ -585,6 +655,10 @@
           : "moolre_slide_down 220ms cubic-bezier(.2,.9,.2,1) forwards";
       }
 
+      if (this._keyListener) {
+        document.removeEventListener("keydown", this._keyListener);
+        this._keyListener = null;
+      }
       // remove listener
       if (this._listener) {
         window.removeEventListener("message", this._listener, false);
@@ -603,7 +677,9 @@
     }
 
     _installGlobalStyles() {
-      if (this._styleElem) return;
+      if (this._styleElem || typeof document === "undefined") return;
+      const existing = document.getElementById("moolre-inline-styles");
+      if (existing) { this._styleElem = existing; return; }
       const style = document.createElement("style");
       style.id = "moolre-inline-styles";
       style.textContent = `
@@ -742,6 +818,23 @@
       `;
       document.head.appendChild(style);
       this._styleElem = style;
+    }
+
+    /**
+     * Legacy `allowedOrigins` option: may only narrow the exact checkout-origin check above, so the old
+     * ".moolre.com" suffix form stays accepted here (it can no longer widen trust).
+     */
+    _matchesLegacyOrigin(origin, allowedOrigins) {
+      if (!Array.isArray(allowedOrigins)) return false;
+      let host;
+      try { host = new URL(origin).hostname.toLowerCase(); } catch (e) { return false; }
+      return allowedOrigins.some((o) => {
+        if (typeof o === "string" && o.startsWith(".")) {
+          const d = o.slice(1).toLowerCase();
+          return host === d || host.endsWith("." + d);
+        }
+        return this._isAllowedOrigin(origin, [o]);
+      });
     }
 
     _isAllowedOrigin(origin, allowedOrigins) {

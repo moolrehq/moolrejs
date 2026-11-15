@@ -1,29 +1,41 @@
 {
   "name": "@moolre/moolrejs",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "Moolre Inline JavaScript SDK for seamless payments",
   "main": "./src/moolre.js",
   "browser": "./public/v1/moolre.js",
+  "types": "./src/moolre.d.ts",
   "exports": {
     ".": {
+      "types": "./src/moolre.d.ts",
       "browser": "./public/v1/moolre.js",
       "default": "./src/moolre.js"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "files": ["src", "public/v1", "README.md", "LICENSE"],
   "keywords": ["moolre", "payments", "inline", "sdk", "checkout"],
   "scripts": {
-    "build": "npx --yes terser@5.49.0 src/moolre.js --compress --mangle --format comments=false --output public/v1/moolre.js",
-    "prepack": "npm run build"
+    "build": "terser src/moolre.js --compress --mangle --format comments=false --output public/v1/moolre.js",
+    "prepack": "npm run build",
+    "test": "node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^24.1.0",
+    "terser": "5.49.0"
   },
   "author": "Moolre Team",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/moolrehq/moolre-inline-js.git"
+    "url": "git+https://github.com/moolrehq/moolrejs.git"
   },
-  "bugs": "https://github.com/moolrehq/moolre-inline-js/issues",
-  "homepage": "https://github.com/moolrehq/moolre-inline-js#readme",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "bugs": "https://github.com/moolrehq/moolrejs/issues",
+  "homepage": "https://github.com/moolrehq/moolrejs#readme",
   "engines": {
     "node": ">=18"
   }
