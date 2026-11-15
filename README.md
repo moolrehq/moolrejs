@@ -98,7 +98,7 @@ document.querySelector("#pay-now").addEventListener("click", openPayment);
 | `iframeHeight` | No | Checkout modal height. Defaults to `630px`. |
 | `allowedCheckoutOrigins` | No | Exact HTTPS checkout origins. Defaults to `["https://pos.moolre.com"]`. Configure additional trusted hosted checkout origins explicitly. Wildcards and domain suffixes are rejected. |
 | `allowedOrigins` | No | Optional additional restriction on message origins. Messages must always come from the active iframe and its exact checkout URL origin. The legacy `.domain` suffix form is still accepted here, but it can only narrow trust, never widen it. |
-| `environment` | No | `"live"` (default) or `"sandbox"`. Sandbox sends the link request to `https://sandbox.moolre.com/embed/link`; add the sandbox checkout origin to `allowedCheckoutOrigins`. |
+| `environment` | No | `"live"` (default) or `"sandbox"`. Sandbox sends the link request to `https://sandbox.moolre.com/embed/link` and trusts the sandbox checkout at `https://sandbox.moolre.com` (unless you set `allowedCheckoutOrigins` yourself). |
 | `timeoutMs` | No | Abort the link request after this many milliseconds. Defaults to `30000`. |
 | `paymentUrl` | No | Existing payment URL. When supplied, the SDK does not call the link API and API credentials are not required. |
 

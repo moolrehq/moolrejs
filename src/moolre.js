@@ -36,8 +36,17 @@
         timeoutMs: 30000,
         ...defaults,
       };
-      if (defaults.environment === "sandbox" && !defaults.apiBase) {
-        this.defaults.apiBase = "https://sandbox.moolre.com/embed";
+      if (defaults.environment === "sandbox") {
+        // The sandbox serves both the link API and the checkout page from sandbox.moolre.com.
+        if (!defaults.apiBase) {
+          this.defaults.apiBase = "https://sandbox.moolre.com/embed";
+        }
+        if (!defaults.checkoutBase) {
+          this.defaults.checkoutBase = "https://sandbox.moolre.com";
+        }
+        if (!defaults.allowedCheckoutOrigins) {
+          this.defaults.allowedCheckoutOrigins = ["https://sandbox.moolre.com"];
+        }
       }
 
       this.overlay = null;

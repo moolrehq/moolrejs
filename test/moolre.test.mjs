@@ -61,10 +61,12 @@ test('sandbox environment switches the link host', async () => {
   setup();
   const MoolrePay = load();
   let url;
-  globalThis.fetch = async (u) => { url = u; return new Response(JSON.stringify({ status: 1, data: { authorization_url: 'https://pos.moolre.com/x' } })); };
+  globalThis.fetch = async (u) => { url = u; return new Response(JSON.stringify({ status: 1, data: { authorization_url: 'https://sandbox.moolre.com/x' } })); };
   const p = new MoolrePay({ environment: 'sandbox' });
   await p.checkout({ ...base, amount: '1.00' });
   assert.equal(url, 'https://sandbox.moolre.com/embed/link');
+  // the sandbox checkout page is trusted by default; the live one is not
+  assert.deepEqual(p.defaults.allowedCheckoutOrigins, ['https://sandbox.moolre.com']);
   p.destroy();
 });
 
