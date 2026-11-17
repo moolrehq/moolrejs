@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.1 - 2026-11-15
+
+- Read the request id and notices from the new `meta` object (`meta.requestid`, `meta.notices`); the legacy top-level `request_id` / `notices` and the `X-Request-Id` header remain as fallbacks. No public API change.
+
 ## 1.1.0
 
 Built on top of the unreleased "Secure checkout URLs and iframe payment events" and "server-side payment verification" changes (`allowedCheckoutOrigins`, exact-origin and iframe-window message checks, `externalRef` match on success, README verification section), which are included in this release.

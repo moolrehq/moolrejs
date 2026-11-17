@@ -304,7 +304,7 @@
           err = new Error(m || "Payment initiation failed");
           err.code = parsed.code;
           err.fields = typeof parsed.data === "string" ? [parsed.data] : [];
-          err.requestId = parsed.request_id || requestId;
+          err.requestId = (parsed.meta && parsed.meta.requestid) || parsed.request_id || requestId;
         } catch (e) {
           err = new Error((text || "Payment initiation failed").slice(0, 300));
           err.requestId = requestId;
@@ -320,11 +320,12 @@
         const err = new Error(m || "Payment initiation failed");
         err.code = json.code;
         err.fields = typeof json.data === "string" ? [json.data] : [];
-        err.requestId = json.request_id || requestId;
+        err.requestId = (json.meta && json.meta.requestid) || json.request_id || requestId;
         throw err;
       }
-      if (json && Array.isArray(json.notices) && typeof console !== "undefined") {
-        json.notices.forEach((n) => console.warn("[moolre] " + (n.code || "") + ": " + (n.message || "")));
+      const notices = json && json.meta && Array.isArray(json.meta.notices) ? json.meta.notices : json && Array.isArray(json.notices) ? json.notices : [];
+      if (notices.length && typeof console !== "undefined") {
+        notices.forEach((n) => console.warn("[moolre] " + (n.code || "") + ": " + (n.message || "")));
       }
       const url = json?.data?.authorization_url || json?.data?.paymentUrl || json?.authorization_url || json?.paymentUrl;
       if (!url) {

@@ -41,7 +41,7 @@ test('link request: headers, body, amount formatting, request id and notices', a
   const calls = [];
   globalThis.fetch = async (url, init) => {
     calls.push({ url, init });
-    return new Response(JSON.stringify({ status: 1, code: 'POS09', data: { authorization_url: 'https://pos.moolre.com/abc' }, notices: [{ code: 'N1', message: 'm' }] }), { status: 200, headers: { 'x-request-id': 'req_1' } });
+    return new Response(JSON.stringify({ status: 1, code: 'POS09', data: { authorization_url: 'https://pos.moolre.com/abc' }, meta: { requestid: 'req_1', notices: [{ code: 'N1', message: 'm' }] } }), { status: 200, headers: { 'x-request-id': 'req_1' } });
   };
   const warn = console.warn; const warned = []; console.warn = (m) => warned.push(m);
   const p = new MoolrePay();
@@ -54,6 +54,18 @@ test('link request: headers, body, amount formatting, request id and notices', a
   assert.equal(JSON.parse(calls[0].init.body).amount, '50.00');
   assert.match(warned[0], /N1/);
   assert.ok(document.querySelector('.moolre-iframe'));
+  p.destroy();
+});
+
+test('legacy top-level notices are still logged', async () => {
+  setup();
+  const MoolrePay = load();
+  globalThis.fetch = async () => new Response(JSON.stringify({ status: 1, code: 'POS09', data: { authorization_url: 'https://pos.moolre.com/abc' }, notices: [{ code: 'LEGACY1', message: 'm' }] }), { status: 200 });
+  const warn = console.warn; const warned = []; console.warn = (m) => warned.push(m);
+  const p = new MoolrePay();
+  await p.checkout({ ...base, amount: 5 });
+  console.warn = warn;
+  assert.match(warned[0], /LEGACY1/);
   p.destroy();
 });
 
@@ -74,8 +86,12 @@ test('API errors carry code, fields, requestId (HTTP 200 with status 0 and HTTP 
   setup();
   const MoolrePay = load();
   const p = new MoolrePay();
-  globalThis.fetch = async () => new Response(JSON.stringify({ status: 0, code: 'TP13', message: 'External Reference is required and must be unique.', data: 'externalref', request_id: 'req_x' }), { status: 200 });
+  globalThis.fetch = async () => new Response(JSON.stringify({ status: 0, code: 'TP13', message: 'External Reference is required and must be unique.', data: 'externalref', meta: { requestid: 'req_x', notices: [] } }), { status: 200 });
   await assert.rejects(() => p.checkout({ ...base, amount: 1, onError() {} }), (e) => e.code === 'TP13' && e.fields[0] === 'externalref' && e.requestId === 'req_x');
+  globalThis.fetch = async () => new Response(JSON.stringify({ status: 0, code: 'TP13', message: 'x', data: 'externalref', request_id: 'req_legacy' }), { status: 200 });
+  await assert.rejects(() => p.checkout({ ...base, amount: 1, onError() {} }), (e) => e.requestId === 'req_legacy');
+  globalThis.fetch = async () => new Response(JSON.stringify({ status: 0, code: 'TP13', message: 'x', data: 'externalref', meta: { requestid: 'req_422', notices: [] } }), { status: 422, headers: { 'x-request-id': 'req_h' } });
+  await assert.rejects(() => p.checkout({ ...base, amount: 1, onError() {} }), (e) => e.httpStatus === 422 && e.requestId === 'req_422');
   globalThis.fetch = async () => new Response('<html>bad</html>', { status: 502, headers: { 'x-request-id': 'req_h' } });
   await assert.rejects(() => p.checkout({ ...base, amount: 1, onError() {} }), (e) => e.httpStatus === 502 && e.requestId === 'req_h');
 });

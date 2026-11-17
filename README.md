@@ -104,7 +104,7 @@ document.querySelector("#pay-now").addEventListener("click", openPayment);
 
 ## Errors
 
-`onError` (and the rejected promise) receives an `Error` with `code` (a Moolre code such as `TP13`, or `TIMEOUT` / `NETWORK`), `fields`, `requestId` (quote it to Moolre support) and `httpStatus`. API notices, such as deprecation advice, are logged to the console once per response. `checkout()` calls `onError` and then rejects, so do not handle the same failure twice.
+`onError` (and the rejected promise) receives an `Error` with `code` (a Moolre code such as `TP13`, or `TIMEOUT` / `NETWORK`), `fields`, `requestId` (quote it to Moolre support) and `httpStatus`. `requestId` is read from `meta.requestid` in the response (legacy `request_id` and the `X-Request-Id` header are used as fallbacks) and notices from `meta.notices` (legacy top-level `notices` as fallback). API notices, such as deprecation advice, are logged to the console once per response. `checkout()` calls `onError` and then rejects, so do not handle the same failure twice.
 
 ## TypeScript, SSR and cleanup
 
