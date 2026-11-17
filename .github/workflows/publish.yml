@@ -3,12 +3,14 @@
 # One-off setup on npmjs.com: @moolre/moolrejs > Settings > Trusted publisher > GitHub Actions,
 #   organization moolrehq, repository moolrejs, workflow file publish.yml, environment npm.
 # Release: bump package.json and CHANGELOG.md, commit, then `git tag v<version> && git push origin v<version>`.
-# A tag whose version is already on npm runs the tests and skips the publish.
+# A tag whose version is already on npm, or a manual run (Actions > Run workflow), publishes nothing: it runs the
+# tests and checks that npm trusts this workflow.
 name: Publish @moolre/moolrejs to npm
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -27,20 +29,30 @@ jobs:
       - name: npm with trusted publishing support (>= 11.5.1)
         run: npm install -g npm@11
       - name: Tag matches package version
+        if: github.event_name == 'push'
         run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
       - run: npm install --no-audit --no-fund
       - run: npm test
       - name: Build reproduces the committed browser file
         run: npm run build && git diff --exit-code -- public/v1/moolre.js
-      - name: Skip if this version is already on npm
+      - name: Already on npm?
         id: npm
         run: |
           v=$(node -p "require('./package.json').version")
-          if npm view "@moolre/moolrejs@$v" version >/dev/null 2>&1; then
-            echo "published=yes" >> "$GITHUB_OUTPUT"
-            echo "::notice::@moolre/moolrejs@$v is already on npm; nothing to publish"
-          else
-            echo "published=no" >> "$GITHUB_OUTPUT"
-          fi
-      - if: steps.npm.outputs.published == 'no'
+          if npm view "@moolre/moolrejs@$v" version > /dev/null 2>&1; then echo "published=yes" >> "$GITHUB_OUTPUT"; else echo "published=no" >> "$GITHUB_OUTPUT"; fi
+      - name: Publish
+        if: github.event_name == 'push' && steps.npm.outputs.published == 'no'
         run: npm publish --access public
+      - name: Check that npm trusts this workflow (exchanges the OIDC token, publishes nothing)
+        if: steps.npm.outputs.published == 'yes' || github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          id=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=npm:registry.npmjs.org" | jq -r .value)
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $id" \
+            "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/@moolre%2fmoolrejs")
+          if [ "$code" = 201 ] || [ "$code" = 200 ]; then
+            echo "::notice::npm accepts this workflow as the trusted publisher of @moolre/moolrejs; nothing was published"
+          else
+            echo "::error::npm refused the trusted-publisher exchange (HTTP $code): check @moolre/moolrejs > Settings > Trusted publisher"
+            exit 1
+          fi
